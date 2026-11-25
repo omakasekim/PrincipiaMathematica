@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import katex from 'katex';
 import { EQUATION_ATLAS, EQUATION_LEVELS } from '../src/data/equationAtlas';
+import { getEquationVisualSpec } from '../src/components/EquationVisuals';
 import type { LabId } from '../src/engines/types';
 
 describe('100-Equation Atlas Integrity & KaTeX Suite', () => {
@@ -41,6 +42,27 @@ describe('100-Equation Atlas Integrity & KaTeX Suite', () => {
       if (eq.interactive.evalY && eq.interactive.xRange) {
         const mid = 0.5 * (eq.interactive.xRange[0] + eq.interactive.xRange[1]);
         expect(Number.isFinite(eq.interactive.evalY(mid, p))).toBe(true);
+      }
+    }
+  });
+
+  it('provides a live interactive visual spec with sliders & finite outputs for ALL 100 equations', () => {
+    for (const eq of EQUATION_ATLAS) {
+      const spec = getEquationVisualSpec(eq);
+      expect(spec.params.length).toBeGreaterThan(0);
+      const vals: Record<string, number> = {};
+      for (const p of spec.params) vals[p.key] = p.defaultVal;
+      if (spec.evalCurve && spec.xRange) {
+        const mid = 0.5 * (spec.xRange[0] + spec.xRange[1]);
+        expect(Number.isFinite(spec.evalCurve(mid, vals))).toBe(true);
+      }
+      if (spec.evalBars) {
+        const bars = spec.evalBars(vals);
+        expect(bars.length).toBeGreaterThan(0);
+        for (const b of bars) expect(Number.isFinite(b.value)).toBe(true);
+      }
+      if (spec.evalScalar) {
+        expect(spec.evalScalar(vals).value.length).toBeGreaterThan(0);
       }
     }
   });
