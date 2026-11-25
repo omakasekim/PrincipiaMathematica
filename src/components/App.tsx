@@ -9,6 +9,7 @@ import { DEFAULT_HODGE_PARAMS, type HodgeParams } from '../engines/hodgeCycles';
 import type { WorkerResponse } from '../workers/computeWorker';
 import { ViewportCanvas } from './ViewportCanvas';
 import { TelemetryPanel } from './TelemetryPanel';
+import { EquationAtlas } from './EquationAtlas';
 
 interface AllParams {
   VortexBlowup: VortexParams;
@@ -37,10 +38,15 @@ const LAB_META: { id: LabId; title: string; subtitle: string }[] = [
   { id: 'HodgeCycles', title: '6. HodgeCycles — Hodge Diamonds, Periods & Cycles', subtitle: 'Exact Hirzebruch χ_y Hodge diamonds, Künneth products, Shioda tuples & Fermat periods' },
 ];
 
+type WorkspaceMode = 'labs' | 'atlas';
+
 export function App() {
+  const [viewMode, setViewMode] = useState<WorkspaceMode>('labs');
   const [activeLab, setActiveLab] = useState<LabId>('ZetaZero');
   const [allParams, setAllParams] = useState<AllParams>(DEFAULT_ALL);
   const [results, setResults] = useState<Partial<Record<LabId, LabResult>>>({});
+  const [selectedEqId, setSelectedEqId] = useState<number>(81);
+  const [pinnedEqIds, setPinnedEqIds] = useState<number[]>([46, 76, 81, 95]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ fraction: number; status: string }>({ fraction: 0, status: 'Ready' });
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +96,6 @@ export function App() {
     setProgress({ fraction: 0, status: 'Cancelled' });
   };
 
-  // Load state from URL if present, otherwise auto-run initial lab
   useEffect(() => {
     let initLab: LabId = 'ZetaZero';
     let initParams: AllParams = DEFAULT_ALL;
@@ -98,6 +103,9 @@ export function App() {
       const q = new URLSearchParams(location.search).get('state');
       if (q) {
         const parsed = JSON.parse(atob(q));
+        if (parsed.viewMode === 'atlas' || parsed.viewMode === 'labs') setViewMode(parsed.viewMode);
+        if (typeof parsed.selectedEqId === 'number') setSelectedEqId(parsed.selectedEqId);
+        if (Array.isArray(parsed.pinnedEqIds)) setPinnedEqIds(parsed.pinnedEqIds);
         if (parsed.lab && parsed.params) {
           initLab = parsed.lab;
           initParams = { ...DEFAULT_ALL, [initLab]: { ...DEFAULT_ALL[initLab as LabId], ...parsed.params } };
@@ -117,16 +125,36 @@ export function App() {
 
   const handleLabChange = (nextLab: LabId) => {
     setActiveLab(nextLab);
+    setViewMode('labs');
     if (!results[nextLab]) {
       runLab(nextLab, allParams[nextLab]);
     }
   };
 
+  const togglePin = (id: number) => {
+    setPinnedEqIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
   const currentResult = results[activeLab] ?? null;
 
   const exportJson = () => {
-    if (!currentResult) return;
-    const blob = new Blob([JSON.stringify({ params: allParams[activeLab], result: currentResult }, null, 2)], { type: 'application/json' });
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          {
+            viewMode,
+            lab: activeLab,
+            params: allParams[activeLab],
+            selectedEqId,
+            pinnedEqIds,
+            result: currentResult,
+          },
+          null,
+          2
+        ),
+      ],
+      { type: 'application/json' }
+    );
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `principia-${activeLab.toLowerCase()}.json`;
@@ -148,7 +176,15 @@ export function App() {
   };
 
   const copyUrl = () => {
-    const payload = btoa(JSON.stringify({ lab: activeLab, params: allParams[activeLab] }));
+    const payload = btoa(
+      JSON.stringify({
+        viewMode,
+        lab: activeLab,
+        params: allParams[activeLab],
+        selectedEqId,
+        pinnedEqIds,
+      })
+    );
     const url = `${location.origin}${location.pathname}?state=${encodeURIComponent(payload)}`;
     navigator.clipboard?.writeText(url).catch(() => {});
     setToast('Shareable URL copied');
@@ -194,7 +230,7 @@ export function App() {
         <>
           <div className="preset-bar">
             <button onClick={() => { const np: ZetaParams = { tMin: 10, tMax: 75, samples: 900, gueCount: 80 }; updateParam('ZetaZero', np); runLab('ZetaZero', np); }}>First ~20 Zeros</button>
-            <button onClick={() => { const np: ZetaParams = { tMin: 100, tMax: 165, samples: 1200, gueCount: 120 }; updateParam('ZetaZero', np); runLab('ZetaZero', np); }}>Gram Block Region (t≈126)</button>
+            <button onClick={() => { const np: ZetaParams = { tMin: 100, tMax: 165, samples: 1200, gueCount: 120 }; updateParam('ZetaZero', np); runLab('ZetaZero', np); }}>Gram Block (t≈126)</button>
           </div>
           <label>T_min: <b>{p.tMin}</b>
             <input type="range" min={6} max={200} step={2} value={p.tMin} onChange={(e) => updateParam('ZetaZero', { tMin: +e.target.value, tMax: Math.max(p.tMax, +e.target.value + 15) })} />
@@ -280,7 +316,6 @@ export function App() {
         </>
       );
     }
-    // HodgeCycles
     const p = allParams.HodgeCycles;
     return (
       <>
@@ -333,67 +368,116 @@ export function App() {
       <header className="topbar">
         <div className="brand">
           <h1>PrincipiaMathematica</h1>
-          <span className="tagline">Zero-Backend Client-Side Hard-Math Laboratories</span>
+          <span className="tagline">6 Hard-Math Labs &amp; 100-Equation Atlas</span>
         </div>
-        <div className="lab-selector-wrap">
-          <label htmlFor="lab-dropdown">Laboratory:</label>
-          <select
-            id="lab-dropdown"
-            value={activeLab}
-            onChange={(e) => handleLabChange(e.target.value as LabId)}
+
+        <div className="mode-tabs">
+          <button
+            id="tab-labs"
+            className={viewMode === 'labs' ? 'btn-primary' : ''}
+            onClick={() => setViewMode('labs')}
           >
-            {LAB_META.map((m) => (
-              <option key={m.id} value={m.id}>{m.title}</option>
-            ))}
-          </select>
-        </div>
-        <div className="run-controls">
-          <button id="btn-run" className="btn-primary" disabled={running} onClick={() => runLab(activeLab)}>
-            {running ? 'Running…' : '▶ Run Solver'}
+            6 Hard-Math Labs
           </button>
-          {running && <button onClick={cancelRun}>Cancel</button>}
-          <button onClick={() => { updateParam(activeLab, DEFAULT_ALL[activeLab]); runLab(activeLab, DEFAULT_ALL[activeLab]); }}>Reset</button>
+          <button
+            id="tab-atlas"
+            className={viewMode === 'atlas' ? 'btn-primary' : ''}
+            onClick={() => setViewMode('atlas')}
+          >
+            100-Equation Atlas
+          </button>
         </div>
+
+        {viewMode === 'labs' ? (
+          <>
+            <div className="lab-selector-wrap">
+              <label htmlFor="lab-dropdown">Hard-Math Lab:</label>
+              <select
+                id="lab-dropdown"
+                value={activeLab}
+                onChange={(e) => handleLabChange(e.target.value as LabId)}
+              >
+                {LAB_META.map((m) => (
+                  <option key={m.id} value={m.id}>{m.title}</option>
+                ))}
+              </select>
+            </div>
+            <div className="run-controls">
+              <button id="btn-run" className="btn-primary" disabled={running} onClick={() => runLab(activeLab)}>
+                {running ? 'Running…' : '▶ Run Solver'}
+              </button>
+              {running && <button onClick={cancelRun}>Cancel</button>}
+              <button onClick={() => { updateParam(activeLab, DEFAULT_ALL[activeLab]); runLab(activeLab, DEFAULT_ALL[activeLab]); }}>Reset</button>
+            </div>
+          </>
+        ) : (
+          <div className="run-controls">
+            <button onClick={exportJson}>Export Atlas State</button>
+            <button onClick={copyUrl}>Share URL</button>
+          </div>
+        )}
       </header>
 
       <div className="status-strip">
-        <span><strong>{meta.title}</strong> — {meta.subtitle}</span>
-        <span className="status-right">
-          {toast ? toast : progress.status}
-          {running && (
-            <span className="prog-bar"><i style={{ width: `${Math.round(progress.fraction * 100)}%` }} /></span>
-          )}
-        </span>
+        {viewMode === 'labs' ? (
+          <>
+            <span><strong>{meta.title}</strong> — {meta.subtitle}</span>
+            <span className="status-right">
+              {toast ? toast : progress.status}
+              {running && (
+                <span className="prog-bar"><i style={{ width: `${Math.round(progress.fraction * 100)}%` }} /></span>
+              )}
+            </span>
+          </>
+        ) : (
+          <>
+            <span><strong>100-Equation Atlas</strong> — Primary to PhD reference with live KaTeX, interactive evaluators &amp; one-click jump to connected hard labs</span>
+            <span className="status-right">{toast || `${pinnedEqIds.length} pinned`}</span>
+          </>
+        )}
       </div>
 
       {error && <div className="error-banner">Solver error: {error}</div>}
 
-      <main className="workspace-grid">
-        <section className="params-panel">
-          <h2>Parameters &amp; Presets</h2>
-          {renderControls()}
-        </section>
+      {viewMode === 'labs' ? (
+        <main className="workspace-grid">
+          <section className="params-panel">
+            <h2>Parameters &amp; Presets</h2>
+            {renderControls()}
+          </section>
 
-        <section className="viz-panel">
-          {currentResult ? (
-            <ViewportCanvas
-              charts={currentResult.charts}
-              heatmap={currentResult.heatmap}
-              hodgeDiamond={currentResult.hodgeDiamond}
-              table={currentResult.table}
-            />
-          ) : (
-            <div className="empty-state">Computing live results in Web Worker…</div>
-          )}
-        </section>
+          <section className="viz-panel">
+            {currentResult ? (
+              <ViewportCanvas
+                charts={currentResult.charts}
+                heatmap={currentResult.heatmap}
+                hodgeDiamond={currentResult.hodgeDiamond}
+                table={currentResult.table}
+              />
+            ) : (
+              <div className="empty-state">Computing live results in Web Worker…</div>
+            )}
+          </section>
 
-        <TelemetryPanel
-          result={currentResult}
-          onExportJson={exportJson}
-          onExportCsv={exportCsv}
-          onCopyUrl={copyUrl}
+          <TelemetryPanel
+            result={currentResult}
+            onExportJson={exportJson}
+            onExportCsv={exportCsv}
+            onCopyUrl={copyUrl}
+          />
+        </main>
+      ) : (
+        <EquationAtlas
+          selectedId={selectedEqId}
+          pinnedIds={pinnedEqIds}
+          onSelectId={setSelectedEqId}
+          onTogglePin={togglePin}
+          onJumpToLab={(labId) => {
+            handleLabChange(labId);
+            runLab(labId, allParams[labId]);
+          }}
         />
-      </main>
+      )}
     </div>
   );
 }
