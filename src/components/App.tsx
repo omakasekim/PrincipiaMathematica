@@ -10,6 +10,7 @@ import type { WorkerResponse } from '../workers/computeWorker';
 import { ViewportCanvas } from './ViewportCanvas';
 import { TelemetryPanel } from './TelemetryPanel';
 import { EquationAtlas } from './EquationAtlas';
+import { LabVisualizer } from './LabVisualizer';
 
 interface AllParams {
   VortexBlowup: VortexParams;
@@ -448,12 +449,15 @@ export function App() {
 
           <section className="viz-panel">
             {currentResult ? (
-              <ViewportCanvas
-                charts={currentResult.charts}
-                heatmap={currentResult.heatmap}
-                hodgeDiamond={currentResult.hodgeDiamond}
-                table={currentResult.table}
-              />
+              <div className="viewport-grid">
+                <LabVisualizer labId={activeLab} result={currentResult} />
+                <ViewportCanvas
+                  charts={currentResult.charts}
+                  heatmap={currentResult.heatmap}
+                  hodgeDiamond={currentResult.hodgeDiamond}
+                  table={currentResult.table}
+                />
+              </div>
             ) : (
               <div className="empty-state">Computing live results in Web Worker…</div>
             )}

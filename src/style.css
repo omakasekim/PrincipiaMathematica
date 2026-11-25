@@ -324,3 +324,56 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .scalar-readout code { color: #4ade80; font-weight: 700; }
 .atlas-plot-canvas { width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); }
 
+.viz-hero-card {
+  background: linear-gradient(180deg, #131d30 0%, #0d1422 100%);
+  border: 1px solid #2b3e5c;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.viz-hero-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.86rem;
+  color: #f8fafc;
+}
+.viz-hero-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.viz-hero-tools button, .viz-hero-tools select { font-size: 0.75rem; padding: 4px 8px; }
+.hero-canvas { width: 100%; height: auto; display: block; border-radius: 7px; border: 1px solid #1e2d44; cursor: crosshair; }
+.viz-hero-foot { font-size: 0.76rem; color: #94a3b8; font-family: ui-monospace, monospace; }
+.scrub-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.scrub-row input[type="range"] { flex: 1; min-width: 160px; accent-color: #38bdf8; }
+
+.sat-vars-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.sat-var-pill { font-family: ui-monospace, monospace; font-size: 0.76rem; font-weight: 700; padding: 4px 9px; border-radius: 6px; }
+.sat-var-pill.v-true { background: rgba(34, 197, 94, 0.2); border-color: #22c55e; color: #4ade80; }
+.sat-var-pill.v-false { background: rgba(239, 68, 68, 0.16); border-color: #ef4444; color: #fca5a5; }
+.sat-clauses-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.sat-clause-chip { font-family: ui-monospace, monospace; font-size: 0.74rem; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); }
+.sat-clause-chip.c-ok { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.45); color: #86efac; }
+.sat-clause-chip.c-bad { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.65); color: #fecaca; }
+
+.legend-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  font-size: 0.74rem;
+  background: #141e31;
+  color: #cbd5e1;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+}
+.legend-pill-btn i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.legend-pill-btn.is-hidden { opacity: 0.35; text-decoration: line-through; }
+
+.diamond-cell.d-sel { background: #0284c7; color: #fff; border-color: #38bdf8; }
+.diamond-cell.d-sym { background: rgba(168, 85, 247, 0.28); border-color: #c084fc; color: #e9d5ff; }
+.diamond-cell.d-serre { background: rgba(250, 204, 21, 0.22); border-color: #facc15; color: #fef08a; }
+
+

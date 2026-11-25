@@ -4,6 +4,12 @@ import type { ChartSpec, HeatmapSpec, HodgeDiamondData } from '../engines/types'
 function ChartCanvas({ chart }: { chart: ChartSpec }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hoverText, setHoverText] = useState<string>('');
+  const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  const [zoom, setZoom] = useState<[number, number] | null>(null); // normalized [0..1, 0..1] X window
+
+  const toggleSeries = (name: string) => {
+    setHidden((prev) => ({ ...prev, [name]: !prev[name] }));
+  };
 
   const draw = (hoverX?: number) => {
     const c = canvasRef.current;
@@ -24,18 +30,29 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
     ctx.fillStyle = '#070b13';
     ctx.fillRect(0, 0, W, H);
 
-    // Compute bounds
-    let xMin = Infinity, xMax = -Infinity;
+    const visibleSeries = chart.series.filter((s) => !hidden[s.name]);
+    let fullXMin = Infinity, fullXMax = -Infinity;
+    for (const s of visibleSeries) {
+      for (const p of s.points) {
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        if (p.x < fullXMin) fullXMin = p.x;
+        if (p.x > fullXMax) fullXMax = p.x;
+      }
+    }
+    if (!isFinite(fullXMin)) { fullXMin = 0; fullXMax = 1; }
+    if (fullXMax === fullXMin) fullXMax = fullXMin + 1;
+
+    const xMin = zoom ? fullXMin + zoom[0] * (fullXMax - fullXMin) : fullXMin;
+    const xMax = zoom ? fullXMin + zoom[1] * (fullXMax - fullXMin) : fullXMax;
+
     let yLMin = Infinity, yLMax = -Infinity;
     let yRMin = Infinity, yRMax = -Infinity;
-
-    for (const s of chart.series) {
+    for (const s of visibleSeries) {
       const right = s.yAxis === 'right';
       for (const p of s.points) {
         if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        if (p.x < xMin || p.x > xMax) continue;
         const yv = chart.yLog ? Math.log10(Math.max(1e-9, p.y)) : p.y;
-        if (p.x < xMin) xMin = p.x;
-        if (p.x > xMax) xMax = p.x;
         if (right) {
           if (yv < yRMin) yRMin = yv;
           if (yv > yRMax) yRMax = yv;
@@ -45,8 +62,6 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
         }
       }
     }
-    if (!isFinite(xMin)) { xMin = 0; xMax = 1; }
-    if (xMax === xMin) xMax = xMin + 1;
     if (!isFinite(yLMin)) { yLMin = 0; yLMax = 1; }
     if (yLMax === yLMin) { yLMin -= 0.5; yLMax += 0.5; }
     if (!isFinite(yRMin)) { yRMin = 0; yRMax = 1; }
@@ -91,14 +106,18 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
       ctx.fillText(Math.abs(val) >= 100 ? val.toFixed(0) : val.toFixed(2), px, H - 18);
     }
 
-    // Zero line if in range
+    // Clipped plot region
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(padL, padT, pw, ph);
+    ctx.clip();
+
     if (!chart.yLog && yLMin < 0 && yLMax > 0) {
       const y0 = toYL(0);
       ctx.strokeStyle = 'rgba(226, 232, 240, 0.35)';
       ctx.beginPath(); ctx.moveTo(padL, y0); ctx.lineTo(padL + pw, y0); ctx.stroke();
     }
 
-    // Vertical reference lines
     if (chart.vLines) {
       for (const vl of chart.vLines) {
         if (vl.x < xMin || vl.x > xMax) continue;
@@ -114,8 +133,7 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
       }
     }
 
-    // Series rendering
-    for (const s of chart.series) {
+    for (const s of visibleSeries) {
       const toY = s.yAxis === 'right' ? toYR : toYL;
       ctx.save();
       ctx.strokeStyle = s.color;
@@ -124,12 +142,14 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
         const bw = Math.max(4, (pw / Math.max(8, s.points.length)) * 0.72);
         ctx.globalAlpha = 0.75;
         for (const p of s.points) {
+          if (p.x < xMin || p.x > xMax) continue;
           const px = toX(p.x) - bw / 2;
           const py = toY(p.y);
           ctx.fillRect(px, py, bw, Math.max(1, padT + ph - py));
         }
       } else if (s.mode === 'scatter') {
         for (const p of s.points) {
+          if (p.x < xMin || p.x > xMax) continue;
           ctx.beginPath();
           ctx.arc(toX(p.x), toY(p.y), 2.8, 0, Math.PI * 2);
           ctx.fill();
@@ -138,16 +158,16 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
         ctx.lineWidth = 2;
         if (s.mode === 'dashed') ctx.setLineDash([6, 4]);
         ctx.beginPath();
-        s.points.forEach((p, idx) => {
+        let started = false;
+        for (const p of s.points) {
           const px = toX(p.x), py = toY(p.y);
-          if (idx === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        });
+          if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+        }
         ctx.stroke();
-        // Error bars if present
         ctx.setLineDash([]);
         ctx.lineWidth = 1.2;
         for (const p of s.points) {
-          if (p.yErr && p.yErr > 0) {
+          if (p.yErr && p.yErr > 0 && p.x >= xMin && p.x <= xMax) {
             const px = toX(p.x);
             const yHi = toY(p.y + p.yErr);
             const yLo = toY(p.y - p.yErr);
@@ -162,16 +182,7 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
       ctx.restore();
     }
 
-    // Axis titles
-    ctx.fillStyle = '#cbd5e1';
-    ctx.textAlign = 'center';
-    ctx.fillText(chart.xLabel, padL + pw / 2, H - 4);
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#e2e8f0';
-    ctx.font = '600 12px system-ui, sans-serif';
-    ctx.fillText(chart.title, padL, 18);
-
-    // Crosshair on hover
+    // Hover crosshair + glowing markers on each visible series
     if (hoverX !== undefined && hoverX >= padL && hoverX <= padL + pw) {
       ctx.strokeStyle = 'rgba(248, 250, 252, 0.35)';
       ctx.setLineDash([3, 3]);
@@ -179,7 +190,7 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
       ctx.setLineDash([]);
       const xVal = xMin + ((hoverX - padL) / pw) * (xMax - xMin);
       const parts: string[] = [`x=${xVal.toFixed(3)}`];
-      for (const s of chart.series) {
+      for (const s of visibleSeries) {
         if (!s.points.length) continue;
         let best = s.points[0];
         let bestD = Math.abs(best.x - xVal);
@@ -187,22 +198,56 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
           const d = Math.abs(p.x - xVal);
           if (d < bestD) { bestD = d; best = p; }
         }
+        const toY = s.yAxis === 'right' ? toYR : toYL;
+        ctx.fillStyle = s.color;
+        ctx.beginPath();
+        ctx.arc(toX(best.x), toY(best.y), 4.2, 0, Math.PI * 2);
+        ctx.fill();
         parts.push(`${s.name}: ${best.y.toFixed(4)}`);
       }
       setHoverText(parts.join('  |  '));
     }
+    ctx.restore();
+
+    ctx.fillStyle = '#cbd5e1';
+    ctx.textAlign = 'center';
+    ctx.fillText(chart.xLabel, padL + pw / 2, H - 4);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.fillText(chart.title + (zoom ? '  [Zoomed — double-click to reset]' : ''), padL, 18);
   };
 
   useEffect(() => {
-    draw();
+    setZoom(null);
   }, [chart]);
+
+  useEffect(() => {
+    draw();
+  }, [chart, hidden, zoom]);
 
   return (
     <div className="chart-card">
       <canvas
         ref={canvasRef}
         width={680}
-        height={250}
+        height={240}
+        onWheel={(e) => {
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          const f = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+          const [z0, z1] = zoom ?? [0, 1];
+          const span = z1 - z0;
+          const factor = e.deltaY < 0 ? 0.78 : 1.28;
+          const nextSpan = Math.max(0.05, Math.min(1, span * factor));
+          const center = z0 + f * span;
+          let n0 = center - f * nextSpan;
+          let n1 = n0 + nextSpan;
+          if (n0 < 0) { n1 -= n0; n0 = 0; }
+          if (n1 > 1) { n0 -= (n1 - 1); n1 = 1; }
+          setZoom(nextSpan >= 0.99 ? null : [Math.max(0, n0), Math.min(1, n1)]);
+        }}
+        onDoubleClick={() => setZoom(null)}
         onMouseMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           const scaleX = e.currentTarget.width / rect.width;
@@ -216,11 +261,17 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
       <div className="chart-legend">
         <div className="legend-items">
           {chart.series.map((s) => (
-            <span key={s.name} className="legend-pill">
+            <button
+              key={s.name}
+              className={`legend-pill-btn${hidden[s.name] ? ' is-hidden' : ''}`}
+              onClick={() => toggleSeries(s.name)}
+              title="Click to toggle series visibility"
+            >
               <i style={{ background: s.color }} />
               {s.name}
-            </span>
+            </button>
           ))}
+          {zoom && <button className="legend-pill-btn" onClick={() => setZoom(null)}>Reset Zoom</button>}
         </div>
         {hoverText && <span className="hover-readout">{hoverText}</span>}
       </div>
@@ -228,55 +279,12 @@ function ChartCanvas({ chart }: { chart: ChartSpec }) {
   );
 }
 
-function HeatmapCanvas({ heatmap }: { heatmap: HeatmapSpec }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-
-    const { nx, ny, values, minVal, maxVal } = heatmap;
-    const off = document.createElement('canvas');
-    off.width = nx;
-    off.height = ny;
-    const octx = off.getContext('2d')!;
-    const img = octx.createImageData(nx, ny);
-    const range = Math.max(1e-9, maxVal - minVal);
-
-    for (let j = 0; j < ny; j++) {
-      for (let i = 0; i < nx; i++) {
-        const t = Math.max(0, Math.min(1, (values[j * nx + i] - minVal) / range));
-        const p = ((ny - 1 - j) * nx + i) * 4;
-        // Inferno-cyan scientific colormap
-        img.data[p] = Math.round(15 + 240 * Math.pow(t, 0.85));
-        img.data[p + 1] = Math.round(25 + 195 * Math.sin(t * Math.PI * 0.9));
-        img.data[p + 2] = Math.round(60 + 195 * Math.pow(1 - t, 1.3));
-        img.data[p + 3] = 255;
-      }
-    }
-    octx.putImageData(img, 0, 0);
-    ctx.clearRect(0, 0, c.width, c.height);
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(off, 0, 0, c.width, c.height);
-  }, [heatmap]);
-
-  return (
-    <div className="chart-card heatmap-card">
-      <div className="card-subhead">{heatmap.title}</div>
-      <canvas ref={canvasRef} width={320} height={240} />
-      <div className="heatmap-meta">
-        <span>{heatmap.xLabel} × {heatmap.yLabel}</span>
-        <span>min: {heatmap.minVal.toFixed(3)} — max: {heatmap.maxVal.toFixed(3)}</span>
-      </div>
-    </div>
-  );
-}
-
 function HodgeDiamondView({ data }: { data: HodgeDiamondData }) {
   const { dim, h, fermatInfo } = data;
-  // Rows k = 2*dim down to 0: row k displays h^{p, q} with p + q = k
+  const [selectedCell, setSelectedCell] = useState<[number, number] | null>(
+    dim % 2 === 0 ? [dim / 2, dim / 2] : [dim, 0]
+  );
+
   const rows: { k: number; entries: { p: number; q: number; val: number; isMiddle: boolean }[] }[] = [];
   for (let k = 2 * dim; k >= 0; k--) {
     const entries: { p: number; q: number; val: number; isMiddle: boolean }[] = [];
@@ -289,28 +297,43 @@ function HodgeDiamondView({ data }: { data: HodgeDiamondData }) {
 
   return (
     <div className="chart-card hodge-card">
-      <div className="card-subhead">Exact Hodge Diamond h^(p,q)(X) — Complex Dimension {dim}</div>
+      <div className="card-subhead">
+        Interactive Hodge Diamond h^(p,q)(X) — Click any entry to highlight Hodge &amp; Serre duals
+      </div>
       <div className="diamond-grid">
         {rows.map((r) => (
           <div key={r.k} className="diamond-row">
-            {r.entries.map((e) => (
-              <span
-                key={`${e.p}-${e.q}`}
-                className={`diamond-cell${e.isMiddle ? ' middle-hkk' : ''}`}
-                title={`h^{${e.p},${e.q}} = ${e.val}`}
-              >
-                {e.val}
-              </span>
-            ))}
+            {r.entries.map((e) => {
+              const isSel = selectedCell && selectedCell[0] === e.p && selectedCell[1] === e.q;
+              const isSym = selectedCell && selectedCell[0] === e.q && selectedCell[1] === e.p && !isSel;
+              const isSerre = selectedCell && selectedCell[0] === dim - e.p && selectedCell[1] === dim - e.q && !isSel;
+              return (
+                <button
+                  key={`${e.p}-${e.q}`}
+                  className={`diamond-cell${e.isMiddle ? ' middle-hkk' : ''}${isSel ? ' d-sel' : ''}${isSym ? ' d-sym' : ''}${isSerre ? ' d-serre' : ''}`}
+                  title={`h^{${e.p},${e.q}} = ${e.val}`}
+                  onClick={() => setSelectedCell([e.p, e.q])}
+                >
+                  {e.val}
+                </button>
+              );
+            })}
           </div>
         ))}
       </div>
+      {selectedCell && (
+        <div className="fermat-box">
+          Selected: <strong>h^({selectedCell[0]},{selectedCell[1]}) = {h[selectedCell[0]][selectedCell[1]]}</strong>
+          {'  •  '}Hodge conjugate: <strong>h^({selectedCell[1]},{selectedCell[0]}) = {h[selectedCell[1]][selectedCell[0]]}</strong>
+          {'  •  '}Serre dual: <strong>h^({dim - selectedCell[0]},{dim - selectedCell[1]}) = {h[dim - selectedCell[0]][dim - selectedCell[1]]}</strong>
+        </div>
+      )}
       {fermatInfo && (
         <div className="fermat-box">
           <strong>Fermat X_{fermatInfo.degree} ⊂ ℂℙ^{fermatInfo.ambientDim}:</strong>{' '}
           {fermatInfo.totalHodgeTuples > 0
-            ? `Shioda primitive Hodge tuples = ${fermatInfo.totalHodgeTuples} (paired linear-subspace cycles = ${fermatInfo.linearCycleRank})`
-            : 'Period integral evaluated via 16-pt Gauss–Legendre quadrature'}
+            ? `Shioda primitive Hodge tuples = ${fermatInfo.totalHodgeTuples} (linear-subspace cycles = ${fermatInfo.linearCycleRank})`
+            : 'Period integral evaluated via tanh-sinh quadrature'}
           {fermatInfo.periodIntegral && (
             <div className="mono-line">
               {fermatInfo.periodIntegral.label} ≈ {fermatInfo.periodIntegral.re.toFixed(10)}
@@ -324,7 +347,6 @@ function HodgeDiamondView({ data }: { data: HodgeDiamondData }) {
 
 export function ViewportCanvas({
   charts,
-  heatmap,
   hodgeDiamond,
   table,
 }: {
@@ -336,7 +358,6 @@ export function ViewportCanvas({
   return (
     <div className="viewport-grid">
       {hodgeDiamond && <HodgeDiamondView data={hodgeDiamond} />}
-      {heatmap && <HeatmapCanvas heatmap={heatmap} />}
       {charts.map((c) => (
         <ChartCanvas key={c.id} chart={c} />
       ))}
