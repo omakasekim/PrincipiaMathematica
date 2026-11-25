@@ -1,0 +1,25 @@
+{
+  "name": "principia-mathematica",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Unified Hard-Math Laboratories & Interactive Dropdown Workbench (Navier-Stokes, Riemann Zeta, Goldbach Sieves, P vs NP, Yang-Mills SU(2), Hodge Cycles)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.5"
+  }
+}
